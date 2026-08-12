@@ -271,87 +271,158 @@ function Countdown({ startAt }) {
 
 function GameRoom({ room, players, me, isHost }) {
   const [gameIndex, setGameIndex] = useState(room.game_index || 0);
-  useEffect(() => setGameIndex(room.game_index || 0), [room.game_index]);
+  const [gameComplete, setGameComplete] = useState(false);
+  useEffect(() => { setGameIndex(room.game_index || 0); setGameComplete(false); }, [room.game_index]);
 
   const game = GAMES[gameIndex];
+  async function advanceGame() {
+    if (!isHost || !room) return;
+    if (gameIndex >= GAMES.length - 1) {
+      await update(ref(db, `rooms/${room.id}`), { status: "finished", game_index: gameIndex });
+      return;
+    }
+    await update(ref(db, `rooms/${room.id}`), { status: "playing", game_index: gameIndex + 1 });
+  }
+
   return <div className="app-shell">
     <div className="game-head">
-      <div><span className="eyebrow">LIVE GAME</span><h1>{game.title}</h1></div>
+      <div><span className="eyebrow">LIVE GAME {gameIndex + 1} / {GAMES.length}</span><h1>{game.title}</h1></div>
       <div className="live-dot">● LIVE</div>
     </div>
 
-    {gameIndex === 0 && <QuizGame room={room} me={me} isHost={isHost} />}
-    {gameIndex === 1 && <MovieGame room={room} me={me} />}
-    {gameIndex === 2 && <BalloonGame />}
-    {gameIndex === 3 && <CatchGame />}
-    {gameIndex === 4 && <TapGame />}
+    {gameIndex === 0 && <QuizGame room={room} me={me} onComplete={() => setGameComplete(true)} />}
+    {gameIndex === 1 && <MovieGame room={room} me={me} onComplete={() => setGameComplete(true)} />}
+    {gameIndex === 2 && <BalloonGame room={room} me={me} onComplete={() => setGameComplete(true)} />}
+    {gameIndex === 3 && <CatchGame room={room} me={me} onComplete={() => setGameComplete(true)} />}
+    {gameIndex === 4 && <TapGame room={room} me={me} onComplete={() => setGameComplete(true)} />}
+
+    {gameComplete && isHost && <div className="card host-control">
+      <div className="host-title">🎯 Game complete</div>
+      <p>Everyone's results are being saved. Move the whole room to the next game.</p>
+      <button className="start-btn" onClick={advanceGame}>
+        {gameIndex === GAMES.length - 1 ? "🏆 Show Final Results" : "Next Game →"}
+      </button>
+    </div>}
+    {gameComplete && !isHost && <div className="card host-control">
+      <div className="host-title">⏳ Waiting for host…</div>
+      <p>Your score has been saved. The host will move everyone to the next game.</p>
+    </div>}
 
     <div className="mini-leaderboard card">
       <div className="section-row"><h2>Leaderboard</h2><span>{players.length} players</span></div>
-      {[...players].sort((a,b)=>b.score-a.score).slice(0,5).map((p,i)=>
-        <div className="score-row" key={p.player_id}><b>#{i+1}</b><span>{p.name}</span><strong>{p.score}</strong></div>
-      )}
+      {[...players].sort((a,b)=>(b.score||0)-(a.score||0)).slice(0,5).map((p,i)=>(
+        <div className="score-row" key={p.player_id}><b>#{i+1}</b><span>{p.name}</span><strong>{p.score||0}</strong></div>
+      ))}
     </div>
   </div>;
 }
 
-function QuizGame({ room, me, isHost }) {
+async function saveAnswer(room, me, gameKey, questionNumber, answerIndex, correct, points) {
+  if (!room || !me) return;
+  const answerRef = ref(db, `rooms/${room.id}/players/${me.player_id}/answers/${gameKey}/${questionNumber}`);
+  const existing = await get(answerRef);
+  if (existing.exists()) return;
+  await set(answerRef, {
+    answerIndex,
+    correct,
+    points,
+    answeredAt: Date.now()
+  });
+  if (points > 0) {
+    await update(ref(db, `rooms/${room.id}/players/${me.player_id}`), {
+      score: (me.score || 0) + points
+    });
+  }
+}
+
+function QuizGame({ room, me, onComplete }) {
   const [q, setQ] = useState(0);
   const [answered, setAnswered] = useState(false);
-  const [locked, setLocked] = useState(false);
   const [time, setTime] = useState(12);
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
+    if (done || answered) return;
     const id = setInterval(() => setTime(t => Math.max(0, t - 1)), 1000);
     return () => clearInterval(id);
-  }, [q]);
+  }, [q, answered, done]);
 
-  const current = QUIZ[q % QUIZ.length];
+  const current = QUIZ[q];
+
   async function answer(i) {
-    if (answered || locked || !me) return;
+    if (answered || done || !me || !current) return;
     setAnswered(true);
-    if (i === current[2]) {
-      await update(ref(db, `rooms/${room.id}/players/${me.player_id}`), { score: (me.score || 0) + Math.max(10, time) });
-    }
+    const correct = i === current[2];
+    const points = correct ? Math.max(10, time) : 0;
+    await saveAnswer(room, me, "quiz", q + 1, i, correct, points);
   }
+
   function next() {
-    setAnswered(false); setTime(12); setQ(v => v + 1);
+    if (q >= QUIZ.length - 1) {
+      setDone(true);
+      onComplete();
+      return;
+    }
+    setAnswered(false);
+    setTime(12);
+    setQ(v => v + 1);
   }
+
+  if (done) return <div className="play-card card"><div className="question-count">QUIZ COMPLETE</div><h2>🎉 All {QUIZ.length} questions answered!</h2><p>Your answers and score have been saved.</p></div>;
+
   return <div className="play-card card">
     <div className="timer">⏱ {time}s</div>
-    <div className="question-count">QUESTION {q+1} / 20</div>
+    <div className="question-count">QUESTION {q + 1} / {QUIZ.length}</div>
     <h2>{current[0]}</h2>
-    <div className="answers">{current[1].map((a,i)=>
+    <div className="answers">{current[1].map((a,i)=>(
       <button className={answered ? (i===current[2] ? "correct" : "muted") : ""} key={a} onClick={()=>answer(i)}>{String.fromCharCode(65+i)}. {a}</button>
-    )}</div>
-    {answered && <button className="next-btn" onClick={next}>Next question →</button>}
+    ))}</div>
+    {answered && <button className="next-btn" onClick={next}>{q === QUIZ.length - 1 ? "Finish Quiz →" : "Next question →"}</button>}
   </div>;
 }
 
-function MovieGame({ me }) {
+function MovieGame({ room, me, onComplete }) {
   const [round, setRound] = useState(0);
   const [answered, setAnswered] = useState(false);
-  const current = MOVIES[round % MOVIES.length];
+  const [done, setDone] = useState(false);
+  const current = MOVIES[round];
+
   async function answer(i) {
-    if (answered) return;
+    if (answered || done || !current) return;
     setAnswered(true);
-    if (i === current[2] && me) await update(ref(db, `rooms/${room.id}/players/${me.player_id}`), { score: (me.score || 0) + 20 });
+    const correct = i === current[2];
+    await saveAnswer(room, me, "movie", round + 1, i, correct, correct ? 20 : 0);
   }
+
+  function next() {
+    if (round >= MOVIES.length - 1) {
+      setDone(true);
+      onComplete();
+      return;
+    }
+    setRound(r=>r+1);
+    setAnswered(false);
+  }
+
+  if (done) return <div className="play-card card"><div className="question-count">MOVIE CHALLENGE COMPLETE</div><h2>🎬 All {MOVIES.length} rounds complete!</h2><p>Your results have been saved.</p></div>;
+
   return <div className="play-card card">
-    <div className="question-count">ROUND {round+1} / 3</div>
+    <div className="question-count">ROUND {round+1} / {MOVIES.length}</div>
     <div className="movie-clue">{current[0]}</div>
     <h2>Which patriotic movie is this?</h2>
-    <div className="answers">{current[1].map((a,i)=>
+    <div className="answers">{current[1].map((a,i)=>(
       <button className={answered ? (i===current[2] ? "correct" : "muted") : ""} key={a} onClick={()=>answer(i)}>{a}</button>
-    )}</div>
-    {answered && <button className="next-btn" onClick={()=>{setRound(r=>r+1);setAnswered(false)}}>Next round →</button>}
+    ))}</div>
+    {answered && <button className="next-btn" onClick={next}>{round === MOVIES.length - 1 ? "Finish Challenge →" : "Next round →"}</button>}
   </div>;
 }
 
-function BalloonGame() {
+function BalloonGame({ room, me, onComplete }) {
   const [score, setScore] = useState(0);
   const [items, setItems] = useState([]);
   const [running, setRunning] = useState(true);
+  const saved = useRef(false);
+
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => {
@@ -361,8 +432,17 @@ function BalloonGame() {
     const end = setTimeout(() => setRunning(false), 30000);
     return () => { clearInterval(id); clearTimeout(end); };
   }, [running]);
+
+  useEffect(() => {
+    if (!running && !saved.current) {
+      saved.current = true;
+      saveMiniGameScore(room, me, "balloon", score);
+      onComplete();
+    }
+  }, [running]);
+
   return <div className="arcade card">
-    <div className="arcade-score">Score {score}</div>
+    <div className="arcade-score">Score {score} • 30s</div>
     <div className="arcade-stage">{items.map(x =>
       <button className="floating" style={{left:`${x.left}%`}} key={x.id} onClick={()=>{
         setItems(a=>a.filter(y=>y.id!==x.id));
@@ -373,19 +453,30 @@ function BalloonGame() {
   </div>;
 }
 
-function CatchGame() {
+function CatchGame({ room, me, onComplete }) {
   const [score, setScore] = useState(0);
   const [x, setX] = useState(50);
   const [items, setItems] = useState([]);
+  const [time, setTime] = useState(30);
+  const saved = useRef(false);
+
   useEffect(() => {
     const id = setInterval(() => {
       setItems(a=>[...a.slice(-8), {id:crypto.randomUUID(), left:10+Math.random()*80, top:0, emoji:Math.random()>.15 ? (Math.random()>.5?"🪔":"🇮🇳"):"💣"}]);
     }, 700);
-    const move = setInterval(() => {
-      setItems(a=>a.map(i=>({...i,top:i.top+4})).filter(i=>i.top<100));
-    }, 120);
-    return () => { clearInterval(id); clearInterval(move); };
+    const move = setInterval(() => setItems(a=>a.map(i=>({...i,top:i.top+4})).filter(i=>i.top<100)), 120);
+    const timer = setInterval(() => setTime(t=>Math.max(0,t-1)),1000);
+    return () => { clearInterval(id); clearInterval(move); clearInterval(timer); };
   }, []);
+
+  useEffect(() => {
+    if (time === 0 && !saved.current) {
+      saved.current = true;
+      saveMiniGameScore(room, me, "catch", score);
+      onComplete();
+    }
+  }, [time]);
+
   useEffect(() => {
     setItems(a=>a.filter(i=>{
       if(i.top>82 && Math.abs(i.left-x)<10){
@@ -395,21 +486,33 @@ function CatchGame() {
       return true;
     }));
   }, [items.length, x]);
+
   return <div className="arcade card">
-    <div className="arcade-score">Score {score}</div>
+    <div className="arcade-score">Score {score} • {time}s</div>
     <div className="catch-stage">{items.map(i=><span key={i.id} className="falling" style={{left:`${i.left}%`,top:`${i.top}%`}}>{i.emoji}</span>)}<div className="basket" style={{left:`${x}%`}}>🧺</div></div>
     <input aria-label="Move basket" type="range" min="5" max="95" value={x} onChange={e=>setX(+e.target.value)} />
   </div>;
 }
 
-function TapGame() {
+function TapGame({ room, me, onComplete }) {
   const [target, setTarget] = useState({x:50,y:50,emoji:"🎈"});
   const [score, setScore] = useState(0);
   const [time, setTime] = useState(30);
+  const saved = useRef(false);
+
   useEffect(() => {
     const id = setInterval(() => setTime(t=>Math.max(0,t-1)),1000);
     return ()=>clearInterval(id);
   },[]);
+
+  useEffect(() => {
+    if (time === 0 && !saved.current) {
+      saved.current = true;
+      saveMiniGameScore(room, me, "chakra", score);
+      onComplete();
+    }
+  }, [time]);
+
   function spawn() {
     setTarget({x:10+Math.random()*80,y:10+Math.random()*70,emoji:Math.random()>.15?"🎈":"💣"});
   }
@@ -419,6 +522,15 @@ function TapGame() {
       <button className="tap-target" style={{left:`${target.x}%`,top:`${target.y}%`}} onClick={()=>{setScore(s=>target.emoji==="🎈"?s+10:Math.max(0,s-30));spawn()}}>{target.emoji}</button>
     </div>
   </div>;
+}
+
+async function saveMiniGameScore(room, me, gameKey, score) {
+  if (!room || !me) return;
+  const scoreRef = ref(db, `rooms/${room.id}/players/${me.player_id}/gameScores/${gameKey}`);
+  const existing = await get(scoreRef);
+  if (existing.exists()) return;
+  await set(scoreRef, { score, completedAt: Date.now() });
+  await update(ref(db, `rooms/${room.id}/players/${me.player_id}`), { score: (me.score || 0) + score });
 }
 
 function Results({ players, leaveRoom }) {

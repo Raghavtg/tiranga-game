@@ -1,54 +1,26 @@
-TIRANGA GAME — START HERE
-==========================
+TIRANGA GAME — UPDATED FIREBASE VERSION
+========================================
 
-I have already connected this copy to your Firebase project:
-Project: tiranga-game-92789
+This version is already connected to Firebase project: tiranga-game-92789.
 
-You do NOT need to create another Firebase project.
-You do NOT need to edit the code.
-You do NOT need to create a .env file.
+WHAT WAS FIXED
+- Freedom Quiz now has 20 questions and stops at 20/20.
+- Quiz answers are saved in Firebase under each player.
+- Quiz scores are saved in Firebase.
+- Movie answers/scores are saved in Firebase.
+- Balloon Shooter final score is saved in Firebase.
+- Tiranga Catch final score is saved in Firebase.
+- Chakra Tap final score is saved in Firebase.
+- Each game has a completion state.
+- Host can move the entire room to the next game.
+- Host can show final results after the fifth game.
+- Existing shared lobby/host behavior remains.
 
-YOUR JOB NOW:
-1. Upload this folder to GitHub.
-2. Connect the GitHub repository to Netlify.
-3. Netlify builds and publishes the game.
-4. Test the same room on 2–3 phones.
+DEPLOY
+1. Upload the changed files to the same GitHub repository.
+2. Netlify will automatically build/deploy from GitHub.
+3. No new Firebase project is needed.
 
-IMPORTANT:
-- Your Firebase Realtime Database rules are currently public for testing.
-- This is okay for the initial test only.
-- Before the real event, secure the rules.
-
-GITHUB (PHONE):
-1. Open github.com and sign in.
-2. Create a new repository called: tiranga-game
-3. Choose Private.
-4. Open the new empty repository.
-5. Tap Add file → Upload files.
-6. Upload EVERYTHING INSIDE this folder (not this ZIP file).
-7. Commit the files.
-
-NETLIFY:
-1. Open app.netlify.com and sign in.
-2. Add new project → Import an existing project.
-3. Choose GitHub.
-4. Select the tiranga-game repository.
-5. Build command: npm run build
-6. Publish directory: dist
-7. Deploy.
-
-AFTER DEPLOYMENT:
-Phone 1:
-  Raghav → Create New Room
-
-Phone 2:
-  Amit → enter the room code → Join
-
-Phone 3:
-  Priya → enter the room code → Join
-
-All phones should show all players.
-Only the person who created the room gets:
-  START FOR EVERYONE
-
-If you get stuck, send me a screenshot of the screen you are on.
+IMPORTANT
+Firebase Realtime Database is still using public test rules from the prototype.
+Secure the rules before the real event.
